@@ -10,18 +10,22 @@ class HeaderLookup
   MESH_ID_URI = "https://id.nlm.nih.gov/mesh/"
   MEMOIZED_MESH_FILE = "memoized_mesh.txt"
   MEMOIZED_LCSH_FILE = "memoized_lcsh.txt"
+  MEMOIZED_LCNAF_FILE = "memoized_lcnaf.txt"
   SEARCHABLE_MESH_FILE = "subjects_mesh.yml"
   SEARCHABLE_LCSH_FILE = "subjects_lcsh.yml"
+  SEARCHABLE_LCNAF_FILE = "trimmed_lcnaf.yml"
 
   def initialize
     puts "initializing header_lookup..."
     # these are the terms to search through for header lookups
     @@searchable_mesh_terms ||= YAML.load_file(SEARCHABLE_MESH_FILE)
     @@searchable_lcsh_terms ||= YAML.load_file(SEARCHABLE_LCSH_FILE)
+    @@searchable_lcnaf_file ||= File.open(SEARCHABLE_LCNAF_FILE, "r")
 
     # these are values that have been previously found from the searchable terms
     @@memoized_mesh ||= read_memoized_headers(MEMOIZED_MESH_FILE)
     @@memoized_lcsh ||= read_memoized_headers(MEMOIZED_LCSH_FILE)
+    @@memoized_lcnaf ||= read_memoized_headers(MEMOIZED_LCNAF_FILE)
   end
 
   def pid_lookup_by_scheme(term="", scheme="")
@@ -31,6 +35,8 @@ class HeaderLookup
       @@memoized_mesh[term] || mesh_term_pid_local_lookup(term) || nil
     elsif scheme == :lcsh
       @@memoized_lcsh[term] || lcsh_term_pid_local_lookup(term) || nil
+    elsif scheme == :tag
+      @@memoized_lcnaf[term] || lcnaf_pid_lookup(term) || nil
     else
       nil
     end
@@ -99,6 +105,27 @@ class HeaderLookup
     end
   end
 
+  def lcnaf_pid_lookup(lcnaf_term)
+    lcnaf_term = downcase_and_remove_non_alphanumeric(lcnaf_term)
+
+    puts lcnaf_term
+    # lcnaf file is the trimmmed file here
+    @@searchable_lcnaf_file.each_line do |line|
+      # get the term and id from the file, trim off quotes and newlines
+      term, pid = line.split('":').map{ |val| val.send(:gsub, /[\"\n]/, "") }
+
+      # if the term matches up memoize, write to file, and return pid
+      if lcnaf_term == downcase_and_remove_non_alphanumeric(term)
+        @@memoized_lcnaf[lcnaf_term] = pid
+        File.write(MEMOIZED_LCNAF_FILE, @@memoized_lcnaf)
+        return pid
+      end
+    end
+
+    # if no pid is found, return nil
+    nil
+  end
+
   private
 
   def perform_and_parse_lcsh_query(stripped_lcsh_term)
@@ -135,11 +162,17 @@ class HeaderLookup
   def read_memoized_headers(filepath)
     begin
       file = File.read(filepath)
+      # in read / write mode
+      # file = File.open(filepath, "w+")
       # eval will interpret a ruby string passed as an argument
       # in this case it constructs a hash from the file
       eval(file)
     rescue Errno::ENOENT
       return {}
     end
+  end
+
+  def downcase_and_remove_non_alphanumeric(str)
+    str.downcase.gsub(/[^\w\s]/, '')
   end
 end
